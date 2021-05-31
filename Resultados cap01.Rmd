@@ -1,0 +1,313 @@
+---
+title: "Limpiesa y analisis de preguntas abiertas del modulo academico"
+author: "Compartido"
+date: "Ultima edicion `r format(Sys.time(), '%d %B %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 5
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+
+---
+
+El siguiente analisis corresponde a las respuestas abiertas de los excel subidas al ODK el 26 de febrero
+
+# Librerias usadas
+
+```{r librerias}
+
+library(tidyverse)
+library(openxlsx)
+library(data.table)
+library(rebus)
+library(fuzzyjoin)
+library(reclin)
+
+```
+
+
+# Funciones de 
+
+## funcion para extraer documentos en formato *.xlsx
+
+```{r}
+
+  extraer_excel <- function(ruta,base,i) {
+    setwd(print(ruta))
+    base01 <- read.xlsx(as.character(base$x[i]),rowNames = F) 
+    name_col <- data.frame(name_col=colnames(base01))
+    name_col <- cbind(name_col,data.frame(num_col=1:ncol(base01)))
+    names(base01)[which(grepl("_id", name_col$name_col))] <- "X_submission__id"
+    base01
+  }
+  
+```
+
+
+## funcion para elegir modulo a analizar
+
+```{r}
+
+  elegir_modulo <- function(ruta,modulo) {
+    base01 <- data.frame(x=dir(print(ruta)))
+    base02 <- base01%>%filter(grepl(modulo, x))
+    base02
+  }
+
+```
+
+  
+## Funcion de concatenacion para identificar duplicados
+
+```{r}
+
+paste_cod <- function(base,sep=", ") { gsub(", " ,sep, toString(base[] ) ) }
+
+```
+
+  
+## Funcion para concatenar columnas para generar columna ID
+
+```{r}
+
+  concatenar_newcod <- function(docs) {
+    aa <- data.frame(names_col=colnames(docs))
+    A <-  which( grepl('cod|piso',aa$names_col)& 
+                   !grepl("cod_informante", aa$names_col, ignore.case=TRUE))
+    cod_dif <- apply( docs[ , A] , 1 , paste_cod , sep="-")
+    docs <- cbind(docs,cod_dif)
+  }
+
+```
+
+
+##funcion para leer duplicados
+
+```{r}
+  duplicados <- function(base_mod) {
+    registros <- base_mod%>%group_by(cod_dif)%>%count(cod_dif)  #lista de n_veces de codigos registrados
+    reg_duplicados <- registros[registros$n >1,] # cÃ³digos de registro repetidos/aÃ±adir toda la linea
+    cod_reg_dupli <- reg_duplicados$cod_dif
+    reg_duplica_newcod <- base_mod%>%filter(cod_dif%in%cod_reg_dupli ==T)
+  }
+
+```
+
+
+  
+## Funcion para dentificar nuevos registros (se debe introducir los 5 : ruta_pasada,ruta_acumulada,modulo,region,i) El argumento i debe dejarse tal cual como una vocal
+  
+```{r}
+
+  nuevos_registros <- function(ruta_pasada,ruta_acumulada,modulo,region,i) {
+    if(!is.na(ruta_pasada)==T){
+      setwd(print(ruta_pasada))
+      Mod_base <- elegir_modulo(ruta_pasada,modulo)
+      docs <-  documentos_de_modulo(ruta_pasada,Mod_base,i)
+      aa <- data.frame(names_col=colnames(docs))
+      names(docs)[which(grepl("X_id|X_submission__id", aa$names_col))] <- "X_submission__id"
+      docs <- concatenar_newcod(docs)
+      if(i==nrow(Mod_base)){
+        A <- transform(docs, ID2=ave(cod_mod, cod_mod, FUN=seq_along))
+        B <- transform(region, ID2=ave(cod_mod, cod_mod, FUN=seq_along))
+        docs <- merge(A, B, all.x=TRUE, sort=FALSE)
+      }
+      cod_reg <- docs$X_submission__id 
+      
+      setwd(print(ruta_acumulada))
+      Mod_base <- elegir_modulo(ruta_acumulada,modulo)
+      docs <-  documentos_de_modulo(ruta_acumulada,Mod_base,i)
+      aa <- data.frame(names_col=colnames(docs))
+      names(docs)[which(grepl("X_id|X_submission__id", aa$names_col))] <- "X_submission__id"
+      docs <- concatenar_newcod(docs)
+      if(i==nrow(Mod_base)){
+        A <- transform(docs, ID2=ave(cod_mod, cod_mod, FUN=seq_along))
+        B <- transform(region, ID2=ave(cod_mod, cod_mod, FUN=seq_along))
+        docs <- merge(A, B, all.x=TRUE, sort=FALSE)
+      }
+      Mod_newcod <- docs%>%filter(X_submission__id%in% cod_reg==F)
+      
+    } else{cod_reg <- NA
+    
+    setwd(print(ruta_acumulada))
+    Mod_base <- elegir_modulo(ruta_acumulada,modulo)
+    docs <-  documentos_de_modulo(ruta_acumulada,Mod_base,i)
+    aa <- data.frame(names_col=colnames(docs))
+    names(docs)[which(grepl("X_id|X_submission__id", aa$names_col))] <- "X_submission__id"
+    docs <- concatenar_newcod(docs)
+    if(i==nrow(Mod_base)){
+      A <- transform(docs, ID2=ave(cod_mod, cod_mod, FUN=seq_along))
+      B <- transform(region, ID2=ave(cod_mod, cod_mod, FUN=seq_along))
+      docs <- merge(A, B, all.x=TRUE, sort=FALSE)
+    }
+    Mod_newcod <- docs%>%filter(X_submission__id%in% cod_reg==F)
+    
+    }
+    
+  }
+
+```
+
+
+## Alterar documentos del modulo
+
+```{r}
+
+  documentos_de_modulo <- function(ruta,base,i) {
+    setwd(print(ruta))
+    Mod_newcod <- read.csv2(as.character(base$x[i])) 
+    name_col <- data.frame(name_col=colnames(Mod_newcod))
+    name_col <- cbind(name_col,data.frame(num_col=1:ncol(Mod_newcod)))
+    names(Mod_newcod)[which(grepl("_id", name_col$name_col))] <- "X_submission__id"
+    Mod_newcod
+  }
+
+```
+  
+  
+## Funcion para evaluar variable policotomica
+
+```{r}
+
+  evaluar_policotomica <- function(docs,variable) {
+    aa <- data.frame(names_col=colnames(docs))
+    A <-  which( grepl(variable,aa$names_col)&
+                   !grepl("_ot", aa$names_col, ignore.case=TRUE))
+    variable_poli <-  rowSums (docs[ , min(A):max(A)])
+    docs <- cbind(docs,variable_poli)
+  }
+
+```
+
+
+## Funcion para comparar registros 
+
+```{r}
+
+  comparar_registros <- function(reg_duplicados,cod_reg_dupli,i) {
+    reg_duplica_compare <- reg_duplicados%>%filter(cod_dif%in%cod_reg_dupli[i] ==T)
+    compare_t <- data.table(t(reg_duplica_compare))
+    compare_t$compare <- ifelse(compare_t$V1==compare_t$V2,0,1)
+    names(compare_t)[(nrow(reg_duplica_compare)+1)]<- paste(cod_reg_dupli[i],"R", sep="_")
+    compare_t
+  }
+
+```
+  
+
+## Funcion para guardar errores o reg duplicados
+
+```{r}
+
+  guardar_error <- function(reg_error,condicion,modulo,fecha) {
+    if(nrow(reg_error) > 0){
+      write.xlsx(reg_error,paste(condicion,modulo,fecha,"xlsx",sep = '.'))
+    }
+  }
+  
+
+```
+
+
+# Cargando Bases de datos
+
+Es en este lugar donde se define manualmente la **ruta de trabajo** y el excel del **modulo** a trabajar,
+
+
+```{r, results = "hide"}
+
+base_pro <- read.xlsx('D:/R-Perci/analisis-de-respuestas-no-estructuradas/programacion.xlsx')
+ruta_pasada <- NA
+ruta_acumulada <- "D:/R-Perci/analisis-de-respuestas-no-estructuradas"
+modulo <- 'CAP01'
+
+region <- base_pro[,1:5]
+names(region)[1] <- 'cod_mod'
+region$cod_mod <- as.numeric(region$cod_mod)
+
+  
+  for (i in 1:nrow(elegir_modulo(ruta_acumulada,modulo))) {
+    Mod01_newcod <- nuevos_registros(ruta_pasada,ruta_acumulada,modulo,region,i)
+    assign(paste("Mod01_newcod", i,sep = "_"), Mod01_newcod)
+  }
+
+
+Mod01_newcod$DEPARTAMENTO <- with(Mod01_newcod, region$DEPARTAMENTO[match(cod_mod,region$cod_mod)])
+
+```
+
+
+# Agrupar columnas que pertenescan a alternativas de respuesta abierta
+
+```{r}
+
+  Data_1 <- tibble(Mod01_newcod_1 %>%
+                  select(ends_with("ot")))
+
+  Data_2 <- tibble(Mod01_newcod_2 %>%
+                  select(ends_with("ot")))
+
+  Data_3 <- tibble(Mod01_newcod_3 %>%
+                  select(ends_with("ot")))
+
+```
+
+
+# Limpieza de la Data_1
+Empezamos a contar los registros de cada columna
+
+## Columna 1
+
+```{r}
+
+Data_1_SinVacio_ordenada <- Data_1 %>%
+                            filter(p51_6_ot != "") %>%
+                            arrange(p51_6_ot)
+
+Data_1_conjunto_inicial <-
+  Data_1_SinVacio_ordenada %>%
+  mutate(
+  Data_1_SinVacio_ordenada_SinPuntuaciones = str_replace_all(Data_1_SinVacio_ordenada$p51_6_ot, pattern = char_class(",-.() "), replacement = " "),
+
+  Data_1_SinVacio_ordenada_SinPuntuaciones_SinEspacios = str_trim(Data_1_SinVacio_ordenada_SinPuntuaciones),
+
+  Data_1_SinVacio_ordenada_SinPuntuaciones_SinEspacios_minuscula = str_to_lower(Data_1_SinVacio_ordenada_SinPuntuaciones_SinEspacios)) %>%
+  rename(p51_6_ot_comparar = Data_1_SinVacio_ordenada_SinPuntuaciones_SinEspacios_minuscula)
+
+Data_1_conjunto_inicial
+
+Data_1_comparacion_inicial <-
+Data_1_conjunto_inicial  %>%
+  select(p51_6_ot_comparar) %>%
+  count(p51_6_ot_comparar) %>%
+  arrange(desc(n))
+
+Data_1_comparacion_inicial
+
+Data_1_comparacion <- as.list(str_split(Data_1_conjunto_inicial$p51_6_ot_comparar, pattern = fixed(" "), simplify = TRUE))
+
+Data_1_comparacion_unida <- tibble(unlist(Data_1_comparacion, use.names = FALSE))
+
+colnames(Data_1_comparacion_unida) <- "p51_6_ot" 
+
+Data_1_comparacion_unida_SinVacio_ordenada <- 
+  Data_1_comparacion_unida %>%
+  filter(p51_6_ot != "") %>%
+  count(p51_6_ot) %>%
+  arrange(desc(n))
+
+Data_1_comparacion_unida_SinVacio_ordenada
+
+Data_1_comparacion_final <- 
+  Data_1_comparacion_inicial %>%
+  filter(str_detect(p51_6_ot_comparar, "ambiente|falta|nuevo|habilitado|pandemia|programas|académicos|agropecuaria|apertura|civil|construcción|producción|equipo|embalado|entregado"))
+
+Data_1_comparacion_final
+
+Data_1_comparacion_final_top10
+
+
+```
+
